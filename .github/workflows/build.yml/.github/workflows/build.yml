@@ -1,0 +1,188 @@
+name: Build FruitCraft APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/fruitcraft/farmer
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FruitCraftFarmer"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.6.1' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.fruitcraft.farmer'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.fruitcraft.farmer'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="FruitCraft Farmer"
+                  android:allowBackup="false">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/fruitcraft/farmer/MainActivity.java <<'EOF'
+          package com.fruitcraft.farmer;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          public class MainActivity extends Activity {
+              private TextView status, timer;
+              private Handler handler = new Handler();
+              private long started;
+              private boolean running = false;
+
+              private Runnable clock = new Runnable() {
+                  public void run() {
+                      if (!running) return;
+                      long seconds = (System.currentTimeMillis() - started) / 1000;
+                      timer.setText(String.format(
+                          "زمان اجرا: %02d:%02d:%02d",
+                          seconds / 3600, (seconds / 60) % 60, seconds % 60));
+                      handler.postDelayed(this, 1000);
+                  }
+              };
+
+              public void onCreate(Bundle b) {
+                  super.onCreate(b);
+
+                  LinearLayout layout = new LinearLayout(this);
+                  layout.setOrientation(1);
+                  layout.setGravity(Gravity.CENTER);
+                  layout.setPadding(28, 28, 28, 28);
+
+                  TextView title = new TextView(this);
+                  title.setText("🍓 FruitCraft Smart Farmer");
+                  title.setTextSize(24);
+                  layout.addView(title);
+
+                  status = new TextView(this);
+                  status.setText("\nوضعیت: متوقف");
+                  status.setTextSize(18);
+                  layout.addView(status);
+
+                  timer = new TextView(this);
+                  timer.setText("\nزمان اجرا: 00:00:00");
+                  timer.setTextSize(18);
+                  layout.addView(timer);
+
+                  Button start = new Button(this);
+                  start.setText("START");
+                  layout.addView(start);
+
+                  Button stop = new Button(this);
+                  stop.setText("STOP");
+                  layout.addView(stop);
+
+                  start.setOnClickListener(v -> {
+                      if (!running) {
+                          running = true;
+                          started = System.currentTimeMillis();
+                          status.setText("وضعیت: در حال اجرا");
+                          handler.post(clock);
+                      }
+                  });
+
+                  stop.setOnClickListener(v -> {
+                      running = false;
+                      handler.removeCallbacks(clock);
+                      status.setText("وضعیت: متوقف");
+                  });
+
+                  setContentView(layout);
+              }
+
+              protected void onDestroy() {
+                  running = false;
+                  handler.removeCallbacks(clock);
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruitCraftFarmer-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
